@@ -547,6 +547,15 @@ async function handleStartInput(coordsX, coordsY) {
                 return;
             }
         }
+        
+        // === 追加: BGMスキップボタン ===
+        let skipBtnY = CONFIG.height / 2 + 120;
+        if (coordsX > btnX && coordsX < btnX + btnW && coordsY > skipBtnY && coordsY < skipBtnY + btnH) {
+            lastUiClickTime = Date.now();
+            loadingComplete = true; // BGM読み込み完了状態を強制的に設定
+            await setGameState('menu');
+            return;
+        }
     }
     else if (gameState === 'menu') {
         let muteBtnSize = 40;
@@ -1891,12 +1900,22 @@ function draw(timestamp) {
         if (!loadingComplete) {
             ctx.fillStyle = "white"; ctx.font = "bold 24px 'Pixelify Sans', sans-serif";
             ctx.fillText(`Now Loading... ${loadingCount}/${loadingTotal}`, CONFIG.width / 2, CONFIG.height / 2);
+            
+            // === 追加: BGMスキップボタン ===
+            ctx.fillStyle = "#ffcc00"; ctx.font = "16px 'Pixelify Sans', sans-serif";
+            ctx.fillText("BGMの読み込みに時間がかかっています…", CONFIG.width / 2, CONFIG.height / 2 - 20);
         } else {
             let startBtnY = CONFIG.height / 2 + 50;
             ctx.fillStyle = "#33cc33"; ctx.fillRect(btnX, startBtnY, btnW, btnH);
             ctx.fillStyle = "white"; ctx.font = "bold 24px 'Pixelify Sans', sans-serif";
             ctx.fillText("Let's Go!", CONFIG.width / 2, startBtnY + btnH / 2 + 8);
         }
+
+        // === 追加: BGMスキップボタン ===
+        let skipBtnY = CONFIG.height / 2 + 120;
+        ctx.fillStyle = "#ffaa00"; ctx.fillRect(btnX, skipBtnY, btnW, btnH);
+        ctx.fillStyle = "#333"; ctx.font = "bold 20px 'Pixelify Sans', sans-serif";
+        ctx.fillText("読み込みをSkip", CONFIG.width / 2, skipBtnY + btnH / 2 + 7);
     }
     else if (gameState === 'menu') {
         if (gokusaiDefeated) {
