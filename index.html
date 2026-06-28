@@ -434,6 +434,7 @@ function resetGokusaiGame(isTestMode = false) {
     
     gokusaiState = {
         madness: false, madnessSummoned: false,
+        madnessStartTime: 0, // === 追加: 極彩背景 ===
         cycleTimer: 0,
         currentPatternIdx: 1,
         activePatterns: {
@@ -909,29 +910,56 @@ function spawnGokusaiPattern5() {
     }
 }
 
+// === 修正: 反射板の重なり防止 ===
 function spawnReflectWall() {
     let wall = { life: 3000, type: Math.random() < 0.2 ? 'white' : 'gray' };
-    // 横壁（天井・床）を70%に増やし、縦壁（左右）を30%に減らす
-    let isVert = Math.random() < 0.3;  // 縦壁30% / 横壁70%
-    if (isVert) {
-        // 縦壁（左右）はそのままランダム配置（出現頻度は低い）
-        wall.w = 15; wall.h = 120;
-        wall.x = Math.random() < 0.5 ? 0 : CONFIG.width - wall.w;
-        wall.y = Math.random() * (CONFIG.height - wall.h);
-        wall.isVertical = true;
-    } else {
-        // 横壁（天井・床）は下端（床）を70%優先
-        wall.w = 120; wall.h = 15;
-        wall.x = Math.random() * (CONFIG.width - wall.w);
-        if (Math.random() < 0.7) {
-            wall.y = CONFIG.height - wall.h; // 床（下端）
+    let margin = 15;
+    let maxAttempts = 20;
+    let isValid = false;
+
+    for (let i = 0; i < maxAttempts; i++) {
+        let isVert = Math.random() < 0.3; // 縦壁30% / 横壁70%
+        if (isVert) {
+            wall.w = 15; wall.h = 120;
+            wall.x = Math.random() < 0.5 ? 0 : CONFIG.width - wall.w;
+            wall.y = Math.random() * (CONFIG.height - wall.h);
+            wall.isVertical = true;
         } else {
-            wall.y = 0; // 天井（上端）
+            wall.w = 120; wall.h = 15;
+            wall.x = Math.random() * (CONFIG.width - wall.w);
+            if (Math.random() < 0.7) {
+                wall.y = CONFIG.height - wall.h; // 床（下端）
+            } else {
+                wall.y = 0; // 天井（上端）
+            }
+            wall.isVertical = false;
         }
-        wall.isVertical = false;
+
+        let isOverlapping = false;
+        for (let existingWall of reflectWalls) {
+            if (
+                wall.x < existingWall.x + existingWall.w + margin &&
+                wall.x + wall.w + margin > existingWall.x &&
+                wall.y < existingWall.y + existingWall.h + margin &&
+                wall.y + wall.h + margin > existingWall.y
+            ) {
+                isOverlapping = true;
+                break;
+            }
+        }
+
+        if (!isOverlapping) {
+            isValid = true;
+            break;
+        }
     }
-    reflectWalls.push(wall);
+
+    // 20回試行しても重ならない位置が見つからなければ追加しない
+    if (isValid) {
+        reflectWalls.push(wall);
+    }
 }
+// === 修正: 反射板の重なり防止 ここまで ===
 
 function summonFiveBosses() {
     let gokusai = gokusaiBosses.find(b => b.id === 0);
@@ -945,10 +973,17 @@ function summonFiveBosses() {
     for (let i = 0; i < 5; i++) {
         let angle = -Math.PI/2 + (i * Math.PI * 2 / 5);
         gokusaiBosses.push({
-            id: i + 1, x: gokusai.x + radius * Math.cos(angle), y: gokusai.y + radius * Math.sin(angle), health: 50, maxHealth: 50,
-            type: 'summon', phase: phases[i], color: colors[i], lastSpawn: gameTime,
-            // === 追加: 召喚ボス回転 ===
-            angle: angle, orbitRadius: radius
+            id: i + 1,
+            x: gokusai.x + radius * Math.cos(angle),
+            y: gokusai.y + radius * Math.sin(angle),
+            health: 50,
+            maxHealth: 50,
+            type: 'summon',
+            phase: phases[i],
+            color: colors[i],
+            lastSpawn: gameTime - 500, // ← 即座に攻撃開始（500ms前に設定）
+            angle: angle,
+            orbitRadius: radius
         });
     }
 }
@@ -1030,7 +1065,8 @@ function updateGokusai(dt) {
 
     let gokusai = gokusaiBosses.find(b => b.id === 0);
     
-    if (gokusai && !gokusaiState.madness) {
+    // === 修正: 発狂中も極彩が移動するように ===
+    if (gokusai) {
         gokusai.x = getSpawnX();
     }
 
@@ -1241,6 +1277,7 @@ function updateGokusai(dt) {
             gokusaiState.madness = true; flashOpacity = 1.0; summonFiveBosses();
             reflectWalls = []; 
             gokusaiBeams = []; 
+            gokusaiState.madnessStartTime = gameTime; // === 追加: 極彩背景 ===
         }
     } else {
         // === 追加: 召喚ボス回転 ===
@@ -1270,6 +1307,16 @@ function updateGokusai(dt) {
 }
 
 function drawGokusai(ctx) {
+    // === 追加: 発狂シェイク ===
+    ctx.save();
+    if (gokusaiState.madness) {
+        let elapsed = gameTime - gokusaiState.madnessStartTime;
+        let shakeIntensity = Math.max(1, 5 - (elapsed / 1000));
+        let sx = (Math.random() - 0.5) * 2 * shakeIntensity;
+        let sy = (Math.random() - 0.5) * 2 * shakeIntensity;
+        ctx.translate(sx, sy);
+    }
+
     ctx.save(); ctx.strokeStyle = "rgba(255, 255, 255, 0.2)"; ctx.lineWidth = 1; ctx.setLineDash([5, 15]); ctx.beginPath(); ctx.moveTo(CONFIG.width/2, 0); ctx.lineTo(CONFIG.width/2, CONFIG.height); ctx.stroke(); ctx.restore();
 
     let gokusai = gokusaiBosses.find(b => b.id === 0);
@@ -1328,7 +1375,20 @@ function drawGokusai(ctx) {
     else if (player.invincible) { if (Math.floor(gameTime / 100) % 2 === 0) playerColor = "white"; else shouldDrawPlayer = false; } 
     else if (player.isSlow) { playerColor = "red"; }
 
-    if (shouldDrawPlayer) { ctx.fillStyle = playerColor; ctx.beginPath(); ctx.arc(player.x, player.y, player.size, 0, Math.PI * 2); ctx.fill(); }
+    if (shouldDrawPlayer) {
+        // === 修正: グロー縮小 ===
+        ctx.save();
+        let glowRadius = 15;
+        let glowGrad = ctx.createRadialGradient(player.x, player.y, 0, player.x, player.y, glowRadius);
+        glowGrad.addColorStop(0, "rgba(0, 0, 0, 1.0)");
+        glowGrad.addColorStop(0.5, "rgba(0, 0, 0, 0.4)");
+        glowGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
+        ctx.fillStyle = glowGrad;
+        ctx.beginPath(); ctx.arc(player.x, player.y, glowRadius, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+        // ======================
+        ctx.fillStyle = playerColor; ctx.beginPath(); ctx.arc(player.x, player.y, player.size, 0, Math.PI * 2); ctx.fill();
+    }
     if (player.isSlow) { ctx.strokeStyle = "red"; ctx.lineWidth = 2; ctx.strokeRect(player.x - 1.5, player.y - 1.5, 3, 3); }
 
     if (CONFIG.debug) {
@@ -1356,6 +1416,9 @@ function drawGokusai(ctx) {
     ctx.fillStyle = "rgba(255, 255, 255, 0.15)"; ctx.fillRect(CONFIG.ui.pauseBtnX, CONFIG.ui.pauseBtnY, CONFIG.ui.pauseBtnSize, CONFIG.ui.pauseBtnSize); ctx.strokeStyle = "rgba(255, 255, 255, 0.6)"; ctx.lineWidth = 1.5; ctx.strokeRect(CONFIG.ui.pauseBtnX, CONFIG.ui.pauseBtnY, CONFIG.ui.pauseBtnSize, CONFIG.ui.pauseBtnSize); ctx.fillStyle = "white"; ctx.font = "bold 18px 'Pixelify Sans', sans-serif"; ctx.textAlign = "center"; ctx.fillText(":", CONFIG.ui.pauseBtnX + CONFIG.ui.pauseBtnSize / 2, CONFIG.ui.pauseBtnY + 24); ctx.textAlign = "left";
 
     if (flashOpacity > 0) { ctx.save(); ctx.fillStyle = `rgba(255, 255, 255, ${flashOpacity})`; ctx.fillRect(0, 0, CONFIG.width, CONFIG.height); ctx.restore(); }
+
+    // === 追加: 発狂シェイクのリストア ===
+    ctx.restore();
 }
 
 function takeDamage() {
@@ -1579,7 +1642,8 @@ let bgState = {
     phase2: { auroras: [], mists: [], particles: [], starTrails: [] },
     phase3: { clouds: [], stars: [], dusts: [], rings: [] },
     phase4: { ashes: [], flares: [], sparks: [] },
-    phase5: { embers: [], smokes: [], lightnings: [], explosions: [] }
+    phase5: { embers: [], smokes: [], lightnings: [], explosions: [] },
+    gokusai: { particles: [], rains: [], lightnings: [] } // === 追加: 極彩背景 ===
 };
 let bgInitialized = false;
 
@@ -1603,6 +1667,32 @@ function initBackgrounds(width, height) {
 
     for(let i=0; i<200; i++) bgState.phase5.embers.push({x: Math.random()*width, y: Math.random()*height, vx: Math.random()*40-20, vy: -(Math.random()*120+50), s: Math.random()*3+1});
     for(let i=0; i<25; i++) bgState.phase5.smokes.push({x: Math.random()*width, y: Math.random()*height, r: Math.random()*60+40, vy: -(Math.random()*40+20)});
+
+    // === 追加: 極彩背景 ===
+    let gokusaiParticleCount = Math.floor(Math.random() * 41) + 80;
+    for(let i=0; i<gokusaiParticleCount; i++) {
+        bgState.gokusai.particles.push({
+            x: Math.random() * width,
+            y: Math.random() * height,
+            s: Math.random() * 3 + 1,
+            vx: Math.random() * 30 + 20,
+            vy: Math.random() * 20 - 10,
+            alpha: Math.random() * 0.4 + 0.1
+        });
+    }
+    let gokusaiRainCount = Math.floor(Math.random() * 21) + 60;
+    for(let i=0; i<gokusaiRainCount; i++) {
+        bgState.gokusai.rains.push({
+            x: Math.random() * width,
+            y: Math.random() * height,
+            len: Math.random() * 40 + 20,
+            w: Math.random() * 1 + 1,
+            vx: Math.random() * 50 + 50,
+            vy: Math.random() * 400 + 400,
+            alpha: Math.random() * 0.4 + 0.3
+        });
+    }
+    // ========================
 }
 
 function drawPhase1(dt, ctx) {
@@ -1847,6 +1937,76 @@ function drawPhase5(dt, ctx) {
     }
 }
 
+// === 追加: 極彩背景 ===
+function drawGokusaiBackground(dt, ctx) {
+    let s = bgState.gokusai;
+    
+    // ベースグラデーション
+    let grad = ctx.createLinearGradient(0, 0, 0, CONFIG.height);
+    grad.addColorStop(0, "#ffffff");
+    grad.addColorStop(0.8, "#d0d0d0");
+    grad.addColorStop(1, "#909090"); // 下端をわずかに暗く
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, CONFIG.width, CONFIG.height);
+
+    // 粒子
+    s.particles.forEach(p => {
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        if(p.x > CONFIG.width + p.s) p.x = -p.s;
+        if(p.y > CONFIG.height + p.s) p.y = -p.s;
+        if(p.y < -p.s) p.y = CONFIG.height + p.s;
+
+        ctx.fillStyle = `rgba(0, 0, 0, ${p.alpha})`;
+        ctx.fillRect(p.x, p.y, p.s, p.s);
+    });
+
+    // 雨
+    ctx.lineCap = "round";
+    s.rains.forEach(r => {
+        r.x += r.vx * dt;
+        r.y += r.vy * dt;
+        if(r.y > CONFIG.height + r.len || r.x > CONFIG.width + r.len) {
+            r.y = -r.len;
+            r.x = Math.random() * CONFIG.width - 50; // 斜めに降るため少し左から
+        }
+
+        ctx.strokeStyle = `rgba(0, 0, 0, ${r.alpha})`;
+        ctx.lineWidth = r.w;
+        ctx.beginPath();
+        ctx.moveTo(r.x, r.y);
+        ctx.lineTo(r.x - r.vx * 0.05, r.y - r.vy * 0.05); // 速度ベースの軌跡
+        ctx.stroke();
+    });
+
+    // 稲妻
+    let isMadness = gokusaiState.madness;
+    let lightningProb = isMadness ? 0.08 : 0.02;
+    if(Math.random() < lightningProb) {
+        let startX = Math.random() * CONFIG.width;
+        let w = isMadness ? Math.random() * 3 + 1 : Math.random() * 2 + 1; // 発狂時は太く
+        s.lightnings.push({x: startX, y: 0, life: 0.2, path: generateLightning(startX, 0), width: w});
+    }
+
+    for(let i=s.lightnings.length-1; i>=0; i--) {
+        let l = s.lightnings[i];
+        l.life -= dt;
+        if(l.life <= 0) { s.lightnings.splice(i, 1); continue; }
+        
+        ctx.strokeStyle = `rgba(0, 0, 0, ${l.life * 5})`; 
+        ctx.lineWidth = l.width;
+        ctx.beginPath();
+        ctx.moveTo(l.path[0].x, l.path[0].y);
+        for(let j=1; j<l.path.length; j++) ctx.lineTo(l.path[j].x, l.path[j].y);
+        ctx.stroke();
+        
+        // === 修正: 稲妻閃光強化 ===
+        ctx.fillStyle = `rgba(0, 0, 0, ${Math.min(0.9, l.life * 5)})`;
+        ctx.fillRect(0,0,CONFIG.width,CONFIG.height);
+    }
+}
+// ========================
+
 function updateAndDrawBackground(dt, ctx) {
     if (!bgInitialized) {
         initBackgrounds(CONFIG.width, CONFIG.height);
@@ -1862,6 +2022,13 @@ function updateAndDrawBackground(dt, ctx) {
         ctx.fillRect(0, 0, CONFIG.width, CONFIG.height);
         return;
     }
+
+    // === 追加: 極彩背景 ===
+    if (isGokusaiBattle) {
+        drawGokusaiBackground(dt, ctx);
+        return;
+    }
+    // ========================
 
     let phase = isGokusaiBattle ? 5 : getBossPhase();
     if (phase === 1) drawPhase1(dt, ctx);
